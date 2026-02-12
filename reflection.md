@@ -7,6 +7,29 @@
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
 
+- Three basic functions a user should be able to complete are: Manage pet/owner info, add/edit tasks, view daily/weekly tasks
+
+- Main objects:
+- Owner: 
+- attributes: name(String), time available(int), preferences
+- methods: get_available_time(), set_available_time(time), update_preferences(...), has_time_for(duration)
+
+- Pet: 
+- attributes: name(string), type(string), breed(string), age(int), special_needs
+- methods: get_info(), update_info(), _str_() 
+
+CareTask:
+attributes: task_id, name, task_type, duration, priority, preferred_time, notes
+methods: get_duration, get_priority, update_task, is_valid, _str_
+
+Schedule:
+attributes: date, scheduled_tasks, total_duration, owner, pet, explanation
+methods: add_task(task, time_slot), remove_task(task_id), get_schedule(), calculate_total_duration(), generate_explanations(), is_feasible(), display()
+
+Scheduler
+attributes: tasks, owner, pet
+methods: generate_schedule(), sort_by_priority(), filter_by_time_constraint(), optimize_order(), explain_reasoning(), handle_conflicts()
+
 **b. Design changes**
 
 - Did your design change during implementation?
