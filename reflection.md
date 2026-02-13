@@ -35,6 +35,13 @@ methods: generate_schedule(), sort_by_priority(), filter_by_time_constraint(), o
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
 
+- Changes: 
+- Return Type Mismatch in filter_by_time_constraint() --> this method needs to return both selected AND excluded tasks for explanation generation. Currently returns only a list. --> Change return type to tuple[list[CareTask], list[CareTask]]
+
+- CareTask Class constants placement --> In dataclasses, class variables defined after instance fields can be problematic. These should be defined at the top of the class or use ClassVar type hint.
+
+- Method Redundancy: Two Explanation Generators --> Schedule.generate_explanatio() (line 134) Scheduler.explain_reasoning(schedule) (line 172)
+
 ---
 
 ## 2. Scheduling Logic and Tradeoffs

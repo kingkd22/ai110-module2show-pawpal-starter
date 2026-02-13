@@ -6,7 +6,7 @@ Core classes for managing pet care tasks and generating daily schedules.
 
 from dataclasses import dataclass, field
 from datetime import date as date_type
-from typing import Optional
+from typing import Optional, ClassVar
 import uuid
 
 
@@ -20,19 +20,21 @@ class Owner:
 
     def get_available_time(self) -> int:
         """Return the available time in minutes."""
-        pass
+        return self.time_available
 
     def set_available_time(self, time: int) -> None:
         """Set the available time in minutes."""
-        pass
+        if time < 0:
+            raise ValueError("Available time cannot be negative")
+        self.time_available = time
 
     def update_preferences(self, **kwargs) -> None:
         """Update owner preferences."""
-        pass
+        self.preferences.update(kwargs)
 
     def has_time_for(self, duration: int) -> bool:
         """Check if owner has enough time for a task of given duration."""
-        pass
+        return self.time_available >= duration
 
 
 @dataclass
@@ -44,24 +46,47 @@ class Pet:
     breed: str = ""
     age: int = 0
     special_needs: list = field(default_factory=list)
+    tasks: list = field(default_factory=list)
 
     def get_info(self) -> str:
         """Return pet information as a formatted string."""
-        pass
+        info = f"{self.name} ({self.type})"
+        if self.breed:
+            info += f", Breed: {self.breed}"
+        if self.age > 0:
+            info += f", Age: {self.age}"
+        if self.special_needs:
+            info += f", Special needs: {', '.join(str(n) for n in self.special_needs)}"
+        return info
 
     def update_info(self, **kwargs) -> None:
         """Update pet information."""
-        pass
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
+    def add_task(self, task) -> None:
+        """Add a task to this pet's task list."""
+        self.tasks.append(task)
+
+    def get_task_count(self) -> int:
+        """Return the number of tasks assigned to this pet."""
+        return len(self.tasks)
 
     def __str__(self) -> str:
         """Return string representation of the pet."""
-        pass
+        return f"{self.name} the {self.type}"
 
 
 @dataclass
 class CareTask:
     """Represents a single pet care task with priority and duration."""
 
+    # Class constants for validation (defined before instance fields)
+    VALID_PRIORITIES: ClassVar[list[str]] = ["low", "medium", "high"]
+    PRIORITY_VALUES: ClassVar[dict[str, int]] = {"high": 3, "medium": 2, "low": 1}
+
+    # Instance fields
     name: str
     duration: int
     priority: str
@@ -69,38 +94,74 @@ class CareTask:
     task_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     preferred_time: Optional[str] = None
     notes: str = ""
-
-    # Class constants for validation
-    VALID_PRIORITIES = ["low", "medium", "high"]
-    PRIORITY_VALUES = {"high": 3, "medium": 2, "low": 1}
+    completed: bool = False
 
     def __post_init__(self):
         """Validate task after initialization."""
-        pass
+        # Normalize priority to lowercase
+        self.priority = self.priority.lower()
+
+        # Set task_type to name if not provided
+        if not self.task_type:
+            self.task_type = self.name
+
+        # Validate the task
+        if not self.is_valid():
+            raise ValueError(f"Invalid task: {self._get_validation_errors()}")
 
     def get_duration(self) -> int:
         """Return task duration in minutes."""
-        pass
+        return self.duration
 
     def get_priority(self) -> str:
         """Return task priority as string."""
-        pass
+        return self.priority
 
     def get_priority_value(self) -> int:
         """Return numeric priority value for sorting (high=3, medium=2, low=1)."""
-        pass
+        return self.PRIORITY_VALUES.get(self.priority, 1)
 
     def update_task(self, **kwargs) -> None:
         """Update task attributes."""
-        pass
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
+        # Re-validate after update
+        if not self.is_valid():
+            raise ValueError(f"Update would make task invalid: {self._get_validation_errors()}")
 
     def is_valid(self) -> bool:
         """Validate that task has required fields and valid values."""
-        pass
+        return (
+            len(self.name) > 0 and
+            self.duration > 0 and
+            self.priority in self.VALID_PRIORITIES
+        )
+
+    def _get_validation_errors(self) -> str:
+        """Helper method to get validation error messages."""
+        errors = []
+        if len(self.name) == 0:
+            errors.append("name cannot be empty")
+        if self.duration <= 0:
+            errors.append(f"duration must be positive (got {self.duration})")
+        if self.priority not in self.VALID_PRIORITIES:
+            errors.append(f"priority must be one of {self.VALID_PRIORITIES} (got '{self.priority}')")
+        return ", ".join(errors)
+
+    def mark_complete(self) -> None:
+        """Mark the task as completed."""
+        self.completed = True
+
+    def is_completed(self) -> bool:
+        """Check if the task is completed."""
+        return self.completed
 
     def __str__(self) -> str:
         """Return string representation of the task."""
-        pass
+        status = "✓" if self.completed else " "
+        return f"[{status}] {self.name} ({self.duration} min, {self.priority} priority)"
 
 
 class Schedule:
@@ -116,32 +177,64 @@ class Schedule:
         self.explanation: str = ""
 
     def add_task(self, task: CareTask, time_slot=None) -> None:
-        """Add a task to the schedule."""
-        pass
+        """Add a task to the schedule.
+
+        Args:
+            task: CareTask to add
+            time_slot: Optional time slot (currently unused, reserved for future enhancement)
+
+        Raises:
+            ValueError: If task with same ID already exists in schedule
+        """
+        # Check for duplicate task ID
+        if any(t.task_id == task.task_id for t in self.scheduled_tasks):
+            raise ValueError(f"Task with ID {task.task_id} already exists in schedule")
+
+        self.scheduled_tasks.append(task)
+        self.calculate_total_duration()
 
     def remove_task(self, task_id: str) -> None:
         """Remove a task from the schedule by ID."""
-        pass
+        self.scheduled_tasks = [t for t in self.scheduled_tasks if t.task_id != task_id]
+        self.calculate_total_duration()
 
-    def get_schedule(self) -> list:
+    def get_schedule(self) -> list[CareTask]:
         """Return the list of scheduled tasks."""
-        pass
+        return self.scheduled_tasks
 
     def calculate_total_duration(self) -> int:
         """Calculate and return total duration of all scheduled tasks."""
-        pass
+        self.total_duration = sum(task.duration for task in self.scheduled_tasks)
+        return self.total_duration
 
     def generate_explanation(self) -> str:
         """Generate human-readable explanation of the schedule."""
-        pass
+        if not self.scheduled_tasks:
+            self.explanation = "No tasks scheduled."
+            return self.explanation
+
+        parts = []
+        parts.append(f"Schedule for {self.pet.name} (Owner: {self.owner.name})")
+        parts.append(f"Date: {self.date}")
+        parts.append(f"Total time: {self.total_duration} of {self.owner.time_available} minutes available")
+
+        parts.append(f"\nTasks ordered by priority:")
+        for i, task in enumerate(self.scheduled_tasks, 1):
+            parts.append(f"{i}. {task.name} ({task.duration} min, {task.priority} priority)")
+
+        if not self.is_feasible():
+            parts.append("\n⚠️  WARNING: Schedule exceeds available time!")
+
+        self.explanation = "\n".join(parts)
+        return self.explanation
 
     def is_feasible(self) -> bool:
         """Check if schedule fits within owner's available time."""
-        pass
+        return self.total_duration <= self.owner.time_available
 
     def display(self) -> None:
         """Display the schedule in a formatted way."""
-        pass
+        print(self.generate_explanation())
 
 
 class Scheduler:
@@ -154,25 +247,97 @@ class Scheduler:
         self.tasks: list[CareTask] = tasks if tasks else []
 
     def generate_schedule(self) -> Schedule:
-        """Generate an optimized schedule based on priorities and constraints."""
-        pass
+        """Generate an optimized schedule based on priorities and constraints.
 
-    def sort_by_priority(self) -> list:
-        """Sort tasks by priority (high to low), then by duration."""
-        pass
+        Algorithm: Priority-Based Greedy with Time Constraints
+        1. Sort tasks by priority (high → low), then by duration (short → long)
+        2. Filter tasks to fit within available time
+        3. Create schedule and add selected tasks
+        4. Generate explanation including excluded tasks
+        """
+        schedule = Schedule(self.owner, self.pet)
 
-    def filter_by_time_constraint(self, sorted_tasks: list) -> list:
-        """Filter tasks to fit within available time."""
-        pass
+        # Handle empty task list
+        if not self.tasks:
+            schedule.explanation = "No tasks provided to schedule."
+            return schedule
 
-    def optimize_order(self, filtered_tasks: list) -> list:
-        """Optimize the order of tasks."""
-        pass
+        # Step 1: Sort by priority
+        sorted_tasks = self.sort_by_priority()
 
-    def explain_reasoning(self, schedule: Schedule) -> str:
-        """Generate explanation for scheduling decisions."""
-        pass
+        # Step 2: Filter by time constraint
+        selected_tasks, excluded_tasks = self.filter_by_time_constraint(sorted_tasks)
+
+        # Step 3: Add selected tasks to schedule
+        for task in selected_tasks:
+            schedule.add_task(task)
+
+        # Step 4: Generate explanation
+        schedule.generate_explanation()
+
+        # Add information about excluded tasks
+        if excluded_tasks:
+            exclusion_text = f"\n\nExcluded tasks due to time constraints:"
+            for task in excluded_tasks:
+                exclusion_text += f"\n  • {task.name} ({task.duration} min, {task.priority} priority)"
+            schedule.explanation += exclusion_text
+
+        return schedule
+
+    def sort_by_priority(self) -> list[CareTask]:
+        """Sort tasks by priority (high to low), then by duration (short to long).
+
+        This ensures:
+        - High priority tasks are scheduled first
+        - Among same priority, shorter tasks come first (better packing)
+        """
+        return sorted(
+            self.tasks,
+            key=lambda t: (-t.get_priority_value(), t.duration)
+        )
+
+    def filter_by_time_constraint(self, sorted_tasks: list[CareTask]) -> tuple[list[CareTask], list[CareTask]]:
+        """Filter tasks to fit within available time.
+
+        Greedy algorithm: iterate through sorted tasks and add each task
+        if it fits within remaining time.
+
+        Returns:
+            tuple: (selected_tasks, excluded_tasks)
+        """
+        running_time = 0
+        selected = []
+        excluded = []
+
+        for task in sorted_tasks:
+            if running_time + task.duration <= self.owner.time_available:
+                selected.append(task)
+                running_time += task.duration
+            else:
+                excluded.append(task)
+
+        return selected, excluded
+
+    def optimize_order(self, filtered_tasks: list[CareTask]) -> list[CareTask]:
+        """Optimize the order of tasks.
+
+        Currently a placeholder for future enhancements like:
+        - Time-window preferences
+        - Task dependencies
+        - Logical ordering (e.g., walk before feeding)
+
+        For now, returns tasks as-is (already sorted by priority).
+        """
+        return filtered_tasks
 
     def handle_conflicts(self) -> None:
-        """Identify and handle scheduling conflicts."""
+        """Identify and handle scheduling conflicts.
+
+        Currently a placeholder for future enhancements like:
+        - Tasks with conflicting time windows
+        - Resource conflicts
+        - Dependency violations
+
+        For now, conflicts are handled implicitly by the time constraint filter.
+        """
         pass
