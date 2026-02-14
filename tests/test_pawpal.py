@@ -2,7 +2,7 @@
 Simple tests for PawPal+ scheduling system.
 """
 
-from pawpal_system import Owner, Pet, CareTask, Scheduler
+from pawpal_system import Owner, Pet, CareTask, Scheduler, parse_time_to_minutes
 from datetime import date as date_type, timedelta
 
 
@@ -546,6 +546,100 @@ def test_same_priority_shorter_task_first():
     assert schedule.scheduled_tasks[2].duration == 40
 
 
+def test_am_pm_time_parsing():
+    """
+    AM/PM Parsing Test: Verify that parse_time_to_minutes correctly
+    handles both 12-hour (AM/PM) and 24-hour time formats.
+    """
+    # 12-hour format tests
+    assert parse_time_to_minutes("12:00 AM") == 0  # Midnight
+    assert parse_time_to_minutes("8:00 AM") == 480  # 8 AM
+    assert parse_time_to_minutes("12:00 PM") == 720  # Noon
+    assert parse_time_to_minutes("2:30 PM") == 870  # 2:30 PM
+    assert parse_time_to_minutes("11:59 PM") == 1439  # 11:59 PM
+
+    # 24-hour format tests
+    assert parse_time_to_minutes("00:00") == 0  # Midnight
+    assert parse_time_to_minutes("08:00") == 480  # 8 AM
+    assert parse_time_to_minutes("12:00") == 720  # Noon
+    assert parse_time_to_minutes("14:30") == 870  # 2:30 PM
+    assert parse_time_to_minutes("23:59") == 1439  # 11:59 PM
+
+    # Edge case: lowercase am/pm
+    assert parse_time_to_minutes("8:00 am") == 480
+    assert parse_time_to_minutes("2:00 pm") == 840  # 2:00 PM = 14:00 = 840 minutes
+
+
+def test_am_pm_sorting():
+    """
+    AM/PM Sorting Test: Verify that tasks with mixed time formats
+    (12-hour and 24-hour) sort correctly in chronological order.
+    """
+    owner = Owner(name="Alex", time_available=300)
+    pet = Pet(name="Buddy", type="dog")
+
+    # Create tasks with mixed formats (intentionally out of order)
+    tasks = [
+        CareTask(name="Dinner", duration=20, priority="medium", preferred_time="6:00 PM"),
+        CareTask(name="Breakfast", duration=15, priority="medium", preferred_time="7:00 AM"),
+        CareTask(name="Lunch", duration=15, priority="medium", preferred_time="12:00 PM"),
+        CareTask(name="Afternoon Snack", duration=10, priority="medium", preferred_time="15:00"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+    sorted_tasks = scheduler.sort_by_time()
+
+    # Assert: Sorted chronologically
+    assert sorted_tasks[0].name == "Breakfast"  # 7:00 AM
+    assert sorted_tasks[1].name == "Lunch"  # 12:00 PM
+    assert sorted_tasks[2].name == "Afternoon Snack"  # 15:00 (3 PM)
+    assert sorted_tasks[3].name == "Dinner"  # 6:00 PM
+
+
+def test_am_pm_conflict_detection():
+    """
+    AM/PM Conflict Test: Verify that conflict detection works correctly
+    when tasks use different time formats (12-hour vs 24-hour).
+    """
+    owner = Owner(name="Jordan", time_available=300)
+    pet = Pet(name="Max", type="dog")
+
+    # Tasks that conflict using different time formats
+    tasks = [
+        CareTask(name="Walk", duration=30, priority="high", preferred_time="8:00 AM"),
+        CareTask(name="Feed", duration=15, priority="high", preferred_time="08:15"),  # Overlaps with Walk
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+    conflicts = scheduler.detect_conflicts(tasks)
+
+    # Assert: Conflict detected despite different time formats
+    assert len(conflicts) == 1
+    assert "Walk" in conflicts[0]
+    assert "Feed" in conflicts[0]
+
+
+def test_am_pm_exact_time_conflict():
+    """
+    AM/PM Exact Time Conflict Test: Verify that two tasks at the same time
+    (one in 12-hour, one in 24-hour format) are detected as conflicts.
+    """
+    owner = Owner(name="Sam", time_available=200)
+    pet = Pet(name="Luna", type="cat")
+
+    tasks = [
+        CareTask(name="Playtime", duration=20, priority="medium", preferred_time="2:00 PM"),
+        CareTask(name="Training", duration=20, priority="medium", preferred_time="14:00"),  # Same time
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+    conflicts = scheduler.detect_conflicts(tasks)
+
+    # Assert: Exact time conflict detected
+    assert len(conflicts) == 1
+    assert "CONFLICT" in conflicts[0]
+
+
 if __name__ == "__main__":
     # Run all tests
     tests = [
@@ -582,6 +676,12 @@ if __name__ == "__main__":
         # Priority scheduling
         ("Priority - High Before Low", test_high_priority_scheduled_before_low),
         ("Priority - Same Priority Order", test_same_priority_shorter_task_first),
+
+        # AM/PM time format support
+        ("AM/PM - Time Parsing", test_am_pm_time_parsing),
+        ("AM/PM - Sorting", test_am_pm_sorting),
+        ("AM/PM - Conflict Detection", test_am_pm_conflict_detection),
+        ("AM/PM - Exact Time Conflict", test_am_pm_exact_time_conflict),
     ]
 
     passed = 0

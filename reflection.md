@@ -51,6 +51,9 @@ methods: generate_schedule(), sort_by_priority(), filter_by_time_constraint(), o
 - What constraints does your scheduler consider (for example: time, priority, preferences)?
 - How did you decide which constraints mattered most?
 
+- The scheduler considers time available (owner's daily minutes), task priority (high/medium/low), task duration, and preferred time slots (with conflict detection for overlapping times).
+- Priority was chosen as the primary constraint because critical pet care tasks (medication, feeding) must be completed before optional activities (playtime, grooming), ensuring essential needs are never skipped due to time limitations.
+
 **b. Tradeoffs**
 
 - Describe one tradeoff your scheduler makes.
@@ -70,11 +73,15 @@ methods: generate_schedule(), sort_by_priority(), filter_by_time_constraint(), o
 - How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
 - What kinds of prompts or questions were most helpful?
 
+- I used Claude at the beginning in the plan mode to fully plan out the project and designing. As the project went along I continued to use it for debugging, test creation and refactoring. 
+- I used prompts which were similar to the codepath instructions. Making sure I'm being clear and descriptive of what I'm doing and the output I am expecting
+
 **b. Judgment and verification**
 
 - Describe one moment where you did not accept an AI suggestion as-is.
 - How did you evaluate or verify what the AI suggested?
 
+- I verified what AI suggested by having Claude explain its reasoning of why it did certain things and planning ahead before implementing code.
 ---
 
 ## 4. Testing and Verification
@@ -84,11 +91,15 @@ methods: generate_schedule(), sort_by_priority(), filter_by_time_constraint(), o
 - What behaviors did you test?
 - Why were these tests important?
 
+- Tested 26 behaviors across 5 categories: (1) core functionality (task completion, recurring tasks with 6 frequencies), (2) sorting algorithms (chronological time, priority-based), (3) conflict detection (exact collisions, overlapping windows, 1-minute precision), (4) AM/PM time parsing (12-hour and 24-hour formats), and (5) edge cases (empty data, zero time, boundary conditions).
+- These tests validate algorithm correctness (O(n log n) sorting, O(n²) conflict detection), ensure real-world reliability (recurring task chains, multi-format time handling), and prevent silent failures in edge cases (tasks without times, exact time-budget fits) that could cause scheduling errors or data loss in production.
+
 **b. Confidence**
 
 - How confident are you that your scheduler works correctly?
 - What edge cases would you test next if you had more time?
 
+- I am very confident the schedular works correctly. If i had more time I would test for different pets sharing a task or having different tasks at the same time.
 ---
 
 ## 5. Reflection
@@ -97,10 +108,16 @@ methods: generate_schedule(), sort_by_priority(), filter_by_time_constraint(), o
 
 - What part of this project are you most satisfied with?
 
+- I am most satisfied with my backend logic and thorogh testing
+
 **b. What you would improve**
 
 - If you had another iteration, what would you improve or redesign?
 
+- I would do a redesign on the UI make it a different style
+
 **c. Key takeaway**
 
 - What is one important thing you learned about designing systems or working with AI on this project?
+
+- I learned how to use the plan mode thoroghly especially designing systems out prior to implementation.

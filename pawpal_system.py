@@ -10,6 +10,64 @@ from typing import Optional, ClassVar
 import uuid
 
 
+def parse_time_to_minutes(time_str: str) -> int:
+    """Parse time string in HH:MM or HH:MM AM/PM format to total minutes since midnight.
+
+    Supports both 24-hour format (e.g., "14:30") and 12-hour format (e.g., "2:30 PM").
+
+    Args:
+        time_str: Time string in "HH:MM" or "HH:MM AM/PM" format
+
+    Returns:
+        Total minutes since midnight (0-1439)
+
+    Examples:
+        - "08:00" → 480
+        - "8:00 AM" → 480
+        - "2:30 PM" → 870
+        - "14:30" → 870
+        - "12:00 AM" → 0 (midnight)
+        - "12:00 PM" → 720 (noon)
+    """
+    if not time_str:
+        return 1440  # End of day for None/empty values
+
+    time_str = time_str.strip().upper()
+
+    # Check for AM/PM format
+    is_pm = "PM" in time_str
+    is_am = "AM" in time_str
+
+    # Remove AM/PM markers
+    time_str = time_str.replace("AM", "").replace("PM", "").strip()
+
+    try:
+        # Parse HH:MM
+        parts = time_str.split(":")
+        hours = int(parts[0])
+        minutes = int(parts[1]) if len(parts) > 1 else 0
+
+        # Convert 12-hour to 24-hour format if AM/PM present
+        if is_am or is_pm:
+            if is_am:
+                # 12:00 AM = 00:00 (midnight)
+                if hours == 12:
+                    hours = 0
+            elif is_pm:
+                # 12:00 PM = 12:00 (noon), 1:00 PM = 13:00, etc.
+                if hours != 12:
+                    hours += 12
+
+        # Validate range
+        if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+            return 1440  # Invalid time sorts to end
+
+        return hours * 60 + minutes
+
+    except (ValueError, IndexError, AttributeError):
+        return 1440  # Invalid format sorts to end
+
+
 @dataclass
 class Owner:
     """Represents a pet owner with time constraints and preferences."""
@@ -106,6 +164,7 @@ class CareTask:
     completed: bool = False
     frequency: str = "once"  # "once", "daily", "weekly"
     due_date: Optional[date_type] = None  # When the task is due
+    pet_name: str = ""  # Name of pet this task belongs to (for multi-pet support)
 
     def __post_init__(self):
         """Validate task after initialization."""
@@ -206,7 +265,8 @@ class CareTask:
             preferred_time=self.preferred_time,
             notes=self.notes,
             frequency=self.frequency,
-            due_date=next_due_date
+            due_date=next_due_date,
+            pet_name=self.pet_name
         )
 
     def is_completed(self) -> bool:
@@ -360,25 +420,15 @@ class Scheduler:
         )
 
     def sort_by_time(self) -> list[CareTask]:
-        """Sort tasks by preferred_time in HH:MM format.
+        """Sort tasks by preferred_time in HH:MM or HH:MM AM/PM format.
 
+        Supports both 24-hour (e.g., "14:30") and 12-hour (e.g., "2:30 PM") formats.
         Tasks without preferred_time (None) are placed at the end.
-        Uses lambda function to parse time strings for sorting.
         """
-        def time_sort_key(task: CareTask) -> tuple:
-            # If no preferred_time, use a large value to sort to end
+        def time_sort_key(task: CareTask) -> int:
             if task.preferred_time is None:
-                return (24, 0)  # Represents end of day
-
-            # Parse "HH:MM" format
-            try:
-                time_parts = task.preferred_time.split(":")
-                hours = int(time_parts[0])
-                minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
-                return (hours, minutes)
-            except (ValueError, AttributeError):
-                # If parsing fails, sort to end
-                return (24, 0)
+                return 1440  # End of day
+            return parse_time_to_minutes(task.preferred_time)
 
         return sorted(self.tasks, key=time_sort_key)
 
@@ -465,42 +515,35 @@ class Scheduler:
         # Check each pair of tasks for conflicts
         for i, task1 in enumerate(timed_tasks):
             for task2 in timed_tasks[i + 1:]:
-                # Parse time for both tasks
-                try:
-                    time1_parts = task1.preferred_time.split(":")
-                    hours1 = int(time1_parts[0])
-                    minutes1 = int(time1_parts[1]) if len(time1_parts) > 1 else 0
-                    start1_minutes = hours1 * 60 + minutes1
-                    end1_minutes = start1_minutes + task1.duration
+                # Parse time for both tasks using helper function
+                start1_minutes = parse_time_to_minutes(task1.preferred_time)
+                start2_minutes = parse_time_to_minutes(task2.preferred_time)
 
-                    time2_parts = task2.preferred_time.split(":")
-                    hours2 = int(time2_parts[0])
-                    minutes2 = int(time2_parts[1]) if len(time2_parts) > 1 else 0
-                    start2_minutes = hours2 * 60 + minutes2
-                    end2_minutes = start2_minutes + task2.duration
-
-                    # Check for time overlap
-                    # Overlap occurs if: task1 starts before task2 ends AND task2 starts before task1 ends
-                    if start1_minutes < end2_minutes and start2_minutes < end1_minutes:
-                        # Format the conflict message
-                        if start1_minutes == start2_minutes:
-                            # Exact same start time
-                            conflict_msg = (
-                                f"⚠️  TIME CONFLICT: '{task1.name}' and '{task2.name}' "
-                                f"both scheduled at {task1.preferred_time}"
-                            )
-                        else:
-                            # Overlapping time windows
-                            conflict_msg = (
-                                f"⚠️  TIME OVERLAP: '{task1.name}' ({task1.preferred_time}, "
-                                f"{task1.duration} min) overlaps with '{task2.name}' "
-                                f"({task2.preferred_time}, {task2.duration} min)"
-                            )
-                        conflicts.append(conflict_msg)
-
-                except (ValueError, AttributeError, IndexError):
-                    # If time parsing fails, skip this pair
+                # Skip if either time is invalid (returns 1440)
+                if start1_minutes >= 1440 or start2_minutes >= 1440:
                     continue
+
+                end1_minutes = start1_minutes + task1.duration
+                end2_minutes = start2_minutes + task2.duration
+
+                # Check for time overlap
+                # Overlap occurs if: task1 starts before task2 ends AND task2 starts before task1 ends
+                if start1_minutes < end2_minutes and start2_minutes < end1_minutes:
+                    # Format the conflict message
+                    if start1_minutes == start2_minutes:
+                        # Exact same start time
+                        conflict_msg = (
+                            f"⚠️  TIME CONFLICT: '{task1.name}' and '{task2.name}' "
+                            f"both scheduled at {task1.preferred_time}"
+                        )
+                    else:
+                        # Overlapping time windows
+                        conflict_msg = (
+                            f"⚠️  TIME OVERLAP: '{task1.name}' ({task1.preferred_time}, "
+                            f"{task1.duration} min) overlaps with '{task2.name}' "
+                            f"({task2.preferred_time}, {task2.duration} min)"
+                        )
+                    conflicts.append(conflict_msg)
 
         return conflicts
 
