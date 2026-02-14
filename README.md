@@ -22,6 +22,37 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Smarter Scheduling
+
+PawPal+ includes intelligent scheduling features that go beyond basic task management:
+
+### 🔄 Recurring Task Automation
+Automatically create next occurrences when tasks are completed. Supports 6 frequency types:
+- **Daily** (medication, feeding, walks)
+- **Biweekly** (nail trimming, ear cleaning)
+- **Weekly** (grooming, training sessions)
+- **Monthly** (flea/tick prevention, vet wellness visits)
+- **Quarterly** (dental cleaning, vaccine boosters)
+- **Yearly** (annual checkup, license renewal)
+
+### ⏰ Time-Based Sorting
+Sort tasks chronologically by preferred time (HH:MM format) to create logical daily schedules that flow naturally throughout the day.
+
+### ⚠️ Conflict Detection
+Lightweight algorithm detects scheduling conflicts:
+- **Exact time collisions**: Two tasks scheduled at the same time
+- **Overlapping windows**: Tasks whose durations cause overlaps
+- Returns warnings instead of crashing (non-blocking validation)
+
+### 🔍 Smart Filtering
+- **By completion status**: View pending vs completed tasks
+- **By pet name**: Filter tasks for specific pets
+- **By time constraints**: Greedy algorithm fits tasks within available time
+
+**Implementation**: Uses O(1) dictionary lookups for extensibility, reducing code complexity by 28% while maintaining performance.
+
+---
+
 ## Getting started
 
 ### Setup

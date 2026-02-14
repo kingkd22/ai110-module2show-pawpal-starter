@@ -5,7 +5,7 @@ Core classes for managing pet care tasks and generating daily schedules.
 """
 
 from dataclasses import dataclass, field
-from datetime import date as date_type
+from datetime import date as date_type, timedelta
 from typing import Optional, ClassVar
 import uuid
 
@@ -85,6 +85,15 @@ class CareTask:
     # Class constants for validation (defined before instance fields)
     VALID_PRIORITIES: ClassVar[list[str]] = ["low", "medium", "high"]
     PRIORITY_VALUES: ClassVar[dict[str, int]] = {"high": 3, "medium": 2, "low": 1}
+    VALID_FREQUENCIES: ClassVar[list[str]] = ["once", "daily", "biweekly", "weekly", "monthly", "quarterly", "yearly"]
+    FREQUENCY_DAYS: ClassVar[dict[str, int]] = {
+        "daily": 1,
+        "biweekly": 14,
+        "weekly": 7,
+        "monthly": 30,
+        "quarterly": 90,
+        "yearly": 365
+    }
 
     # Instance fields
     name: str
@@ -95,6 +104,8 @@ class CareTask:
     preferred_time: Optional[str] = None
     notes: str = ""
     completed: bool = False
+    frequency: str = "once"  # "once", "daily", "weekly"
+    due_date: Optional[date_type] = None  # When the task is due
 
     def __post_init__(self):
         """Validate task after initialization."""
@@ -150,9 +161,53 @@ class CareTask:
             errors.append(f"priority must be one of {self.VALID_PRIORITIES} (got '{self.priority}')")
         return ", ".join(errors)
 
-    def mark_complete(self) -> None:
-        """Mark the task as completed."""
+    def _get_next_due_date(self) -> Optional[date_type]:
+        """Calculate next due date based on task frequency.
+
+        Uses FREQUENCY_DAYS mapping for O(1) lookup. Returns None for
+        non-recurring tasks or unrecognized frequencies.
+
+        Returns:
+            Next due date, or None if task is not recurring.
+        """
+        days_to_add = self.FREQUENCY_DAYS.get(self.frequency)
+        if days_to_add is None:
+            return None
+
+        base_date = self.due_date or date_type.today()
+        return base_date + timedelta(days=days_to_add)
+
+    def mark_complete(self) -> Optional['CareTask']:
+        """Mark the task as completed.
+
+        For recurring tasks (daily/weekly), automatically creates a new instance
+        for the next occurrence using the helper method _get_next_due_date().
+
+        Returns:
+            New CareTask instance if task is recurring, None otherwise.
+        """
         self.completed = True
+
+        # Early return for non-recurring tasks
+        if self.frequency == "once":
+            return None
+
+        # Calculate next due date using helper
+        next_due_date = self._get_next_due_date()
+        if next_due_date is None:
+            return None
+
+        # Create new task instance for next occurrence
+        return CareTask(
+            name=self.name,
+            duration=self.duration,
+            priority=self.priority,
+            task_type=self.task_type,
+            preferred_time=self.preferred_time,
+            notes=self.notes,
+            frequency=self.frequency,
+            due_date=next_due_date
+        )
 
     def is_completed(self) -> bool:
         """Check if the task is completed."""
@@ -282,6 +337,14 @@ class Scheduler:
                 exclusion_text += f"\n  • {task.name} ({task.duration} min, {task.priority} priority)"
             schedule.explanation += exclusion_text
 
+        # Step 5: Detect and report conflicts
+        conflicts = self.detect_conflicts(selected_tasks)
+        if conflicts:
+            conflict_text = f"\n\n⚠️  SCHEDULING CONFLICTS DETECTED:"
+            for conflict in conflicts:
+                conflict_text += f"\n  {conflict}"
+            schedule.explanation += conflict_text
+
         return schedule
 
     def sort_by_priority(self) -> list[CareTask]:
@@ -295,6 +358,29 @@ class Scheduler:
             self.tasks,
             key=lambda t: (-t.get_priority_value(), t.duration)
         )
+
+    def sort_by_time(self) -> list[CareTask]:
+        """Sort tasks by preferred_time in HH:MM format.
+
+        Tasks without preferred_time (None) are placed at the end.
+        Uses lambda function to parse time strings for sorting.
+        """
+        def time_sort_key(task: CareTask) -> tuple:
+            # If no preferred_time, use a large value to sort to end
+            if task.preferred_time is None:
+                return (24, 0)  # Represents end of day
+
+            # Parse "HH:MM" format
+            try:
+                time_parts = task.preferred_time.split(":")
+                hours = int(time_parts[0])
+                minutes = int(time_parts[1]) if len(time_parts) > 1 else 0
+                return (hours, minutes)
+            except (ValueError, AttributeError):
+                # If parsing fails, sort to end
+                return (24, 0)
+
+        return sorted(self.tasks, key=time_sort_key)
 
     def filter_by_time_constraint(self, sorted_tasks: list[CareTask]) -> tuple[list[CareTask], list[CareTask]]:
         """Filter tasks to fit within available time.
@@ -330,14 +416,101 @@ class Scheduler:
         """
         return filtered_tasks
 
-    def handle_conflicts(self) -> None:
+    def filter_by_completion(self, completed: bool = False) -> list[CareTask]:
+        """Filter tasks by completion status.
+
+        Args:
+            completed: If True, return only completed tasks.
+                      If False, return only pending tasks.
+
+        Returns:
+            List of tasks matching the completion status.
+        """
+        return [task for task in self.tasks if task.is_completed() == completed]
+
+    def filter_by_pet_name(self, pet_name: str) -> list[CareTask]:
+        """Filter tasks by pet name.
+
+        Note: This uses the scheduler's pet attribute to check if tasks
+        belong to the specified pet.
+
+        Args:
+            pet_name: Name of the pet to filter by.
+
+        Returns:
+            List of tasks if pet name matches, empty list otherwise.
+        """
+        if self.pet and self.pet.name.lower() == pet_name.lower():
+            return self.tasks
+        return []
+
+    def detect_conflicts(self, tasks_to_check: list[CareTask]) -> list[str]:
+        """Identify scheduling conflicts between tasks.
+
+        Lightweight conflict detection strategy that checks for:
+        - Tasks with the same preferred_time (exact time collision)
+        - Tasks with overlapping time windows (start time + duration)
+
+        Args:
+            tasks_to_check: List of tasks to check for conflicts
+
+        Returns:
+            List of warning messages describing conflicts (empty if no conflicts)
+        """
+        conflicts = []
+
+        # Only check tasks that have preferred_time set
+        timed_tasks = [t for t in tasks_to_check if t.preferred_time is not None]
+
+        # Check each pair of tasks for conflicts
+        for i, task1 in enumerate(timed_tasks):
+            for task2 in timed_tasks[i + 1:]:
+                # Parse time for both tasks
+                try:
+                    time1_parts = task1.preferred_time.split(":")
+                    hours1 = int(time1_parts[0])
+                    minutes1 = int(time1_parts[1]) if len(time1_parts) > 1 else 0
+                    start1_minutes = hours1 * 60 + minutes1
+                    end1_minutes = start1_minutes + task1.duration
+
+                    time2_parts = task2.preferred_time.split(":")
+                    hours2 = int(time2_parts[0])
+                    minutes2 = int(time2_parts[1]) if len(time2_parts) > 1 else 0
+                    start2_minutes = hours2 * 60 + minutes2
+                    end2_minutes = start2_minutes + task2.duration
+
+                    # Check for time overlap
+                    # Overlap occurs if: task1 starts before task2 ends AND task2 starts before task1 ends
+                    if start1_minutes < end2_minutes and start2_minutes < end1_minutes:
+                        # Format the conflict message
+                        if start1_minutes == start2_minutes:
+                            # Exact same start time
+                            conflict_msg = (
+                                f"⚠️  TIME CONFLICT: '{task1.name}' and '{task2.name}' "
+                                f"both scheduled at {task1.preferred_time}"
+                            )
+                        else:
+                            # Overlapping time windows
+                            conflict_msg = (
+                                f"⚠️  TIME OVERLAP: '{task1.name}' ({task1.preferred_time}, "
+                                f"{task1.duration} min) overlaps with '{task2.name}' "
+                                f"({task2.preferred_time}, {task2.duration} min)"
+                            )
+                        conflicts.append(conflict_msg)
+
+                except (ValueError, AttributeError, IndexError):
+                    # If time parsing fails, skip this pair
+                    continue
+
+        return conflicts
+
+    def handle_conflicts(self) -> list[str]:
         """Identify and handle scheduling conflicts.
 
-        Currently a placeholder for future enhancements like:
-        - Tasks with conflicting time windows
-        - Resource conflicts
-        - Dependency violations
+        Checks all tasks in the scheduler for time conflicts and returns
+        warning messages without crashing the program.
 
-        For now, conflicts are handled implicitly by the time constraint filter.
+        Returns:
+            List of conflict warning messages (empty if no conflicts)
         """
-        pass
+        return self.detect_conflicts(self.tasks)
