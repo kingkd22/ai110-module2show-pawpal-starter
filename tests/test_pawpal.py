@@ -236,42 +236,382 @@ def test_conflict_detection_no_times():
     assert len(conflicts) == 0
 
 
+# ============================================================================
+# EDGE CASE TESTS
+# ============================================================================
+
+def test_sort_by_time_chronological_order():
+    """
+    Sorting Correctness: Verify tasks are returned in chronological order.
+    """
+    # Arrange: Create tasks out of order
+    owner = Owner(name="Alice", time_available=300)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Dinner", duration=15, priority="high", preferred_time="18:00"),
+        CareTask(name="Breakfast", duration=10, priority="high", preferred_time="07:00"),
+        CareTask(name="Lunch", duration=10, priority="high", preferred_time="12:00"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Sort by time
+    sorted_tasks = scheduler.sort_by_time()
+
+    # Assert: Tasks are in chronological order
+    assert sorted_tasks[0].preferred_time == "07:00"
+    assert sorted_tasks[1].preferred_time == "12:00"
+    assert sorted_tasks[2].preferred_time == "18:00"
+
+
+def test_sort_by_time_with_none_values():
+    """
+    Edge Case: Tasks without preferred_time should be sorted to end.
+    """
+    # Arrange: Mix of timed and untimed tasks
+    owner = Owner(name="Alice", time_available=300)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Timed 1", duration=10, priority="high", preferred_time="10:00"),
+        CareTask(name="No Time", duration=15, priority="low"),
+        CareTask(name="Timed 2", duration=10, priority="high", preferred_time="08:00"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Sort by time
+    sorted_tasks = scheduler.sort_by_time()
+
+    # Assert: Timed tasks first, then untimed
+    assert sorted_tasks[0].preferred_time == "08:00"
+    assert sorted_tasks[1].preferred_time == "10:00"
+    assert sorted_tasks[2].preferred_time is None
+
+
+def test_recurring_daily_without_due_date():
+    """
+    Recurrence Edge Case: Daily task without due_date should use today.
+    """
+    # Arrange: Daily task with no due_date
+    today = date_type.today()
+    task = CareTask(
+        name="Daily Medication",
+        duration=5,
+        priority="high",
+        frequency="daily"
+    )
+
+    # Act: Mark complete
+    next_task = task.mark_complete()
+
+    # Assert: Next task uses today as base
+    assert next_task is not None
+    assert next_task.due_date == today + timedelta(days=1)
+
+
+def test_recurring_task_chain():
+    """
+    Recurrence Logic: Completing recurring tasks multiple times creates chain.
+    """
+    # Arrange: Daily task
+    today = date_type.today()
+    task = CareTask(
+        name="Morning Walk",
+        duration=30,
+        priority="high",
+        frequency="daily",
+        due_date=today
+    )
+
+    # Act: Complete 3 times in chain
+    current = task
+    for day in range(1, 4):
+        next_task = current.mark_complete()
+        assert next_task is not None
+        assert next_task.due_date == today + timedelta(days=day)
+        current = next_task
+
+
+def test_recurring_task_preserves_attributes():
+    """
+    Recurrence Logic: Next occurrence should preserve all task attributes.
+    """
+    # Arrange: Task with many attributes
+    today = date_type.today()
+    original = CareTask(
+        name="Special Task",
+        duration=45,
+        priority="high",
+        task_type="medication",
+        preferred_time="08:00",
+        notes="Give with food",
+        frequency="daily",
+        due_date=today
+    )
+
+    # Act: Mark complete
+    next_task = original.mark_complete()
+
+    # Assert: All attributes preserved except completed and due_date
+    assert next_task.name == original.name
+    assert next_task.duration == original.duration
+    assert next_task.priority == original.priority
+    assert next_task.task_type == original.task_type
+    assert next_task.preferred_time == original.preferred_time
+    assert next_task.notes == original.notes
+    assert next_task.frequency == original.frequency
+    assert next_task.completed is False
+    assert next_task.task_id != original.task_id
+
+
+def test_conflict_detection_multiple_collisions():
+    """
+    Conflict Detection: Multiple tasks at exact same time should all be flagged.
+    """
+    # Arrange: 3 tasks at same time
+    owner = Owner(name="Alice", time_available=300)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Task A", duration=20, priority="high", preferred_time="10:00"),
+        CareTask(name="Task B", duration=30, priority="high", preferred_time="10:00"),
+        CareTask(name="Task C", duration=15, priority="high", preferred_time="10:00"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Detect conflicts
+    conflicts = scheduler.handle_conflicts()
+
+    # Assert: All pairs detected (3 tasks = 3 conflict pairs)
+    assert len(conflicts) == 3
+
+
+def test_conflict_detection_back_to_back():
+    """
+    Edge Case: Back-to-back tasks (no gap) should NOT conflict.
+    """
+    # Arrange: Adjacent tasks
+    owner = Owner(name="Alice", time_available=300)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Task A", duration=30, priority="high", preferred_time="10:00"),
+        CareTask(name="Task B", duration=30, priority="high", preferred_time="10:30"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Detect conflicts
+    conflicts = scheduler.handle_conflicts()
+
+    # Assert: No conflicts for back-to-back tasks
+    assert len(conflicts) == 0
+
+
+def test_conflict_detection_one_minute_overlap():
+    """
+    Edge Case: Even 1 minute overlap should be detected.
+    """
+    # Arrange: Tasks with 1-minute overlap
+    owner = Owner(name="Alice", time_available=300)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Task A", duration=30, priority="high", preferred_time="10:00"),
+        CareTask(name="Task B", duration=30, priority="high", preferred_time="10:29"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Detect conflicts
+    conflicts = scheduler.handle_conflicts()
+
+    # Assert: 1-minute overlap detected
+    assert len(conflicts) == 1
+
+
+def test_pet_with_no_tasks():
+    """
+    Edge Case: Pet with no tasks should generate empty schedule.
+    """
+    # Arrange: Pet with empty task list
+    owner = Owner(name="Alice", time_available=300)
+    pet = Pet(name="Buddy", type="dog")
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=[])
+
+    # Act: Generate schedule
+    schedule = scheduler.generate_schedule()
+
+    # Assert: Empty schedule
+    assert len(schedule.scheduled_tasks) == 0
+    assert schedule.total_duration == 0
+
+
+def test_zero_time_available():
+    """
+    Edge Case: Owner with 0 minutes available should exclude all tasks.
+    """
+    # Arrange: Owner with no time
+    owner = Owner(name="Alice", time_available=0)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Walk", duration=30, priority="high"),
+        CareTask(name="Feed", duration=10, priority="high"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Generate schedule
+    schedule = scheduler.generate_schedule()
+
+    # Assert: No tasks scheduled
+    assert len(schedule.scheduled_tasks) == 0
+
+
+def test_single_task_exactly_fits_time():
+    """
+    Edge Case: Task that exactly matches available time should be scheduled.
+    """
+    # Arrange: Owner with 30 minutes, task needs 30 minutes
+    owner = Owner(name="Alice", time_available=30)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Perfect Fit", duration=30, priority="high"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Generate schedule
+    schedule = scheduler.generate_schedule()
+
+    # Assert: Task scheduled
+    assert len(schedule.scheduled_tasks) == 1
+    assert schedule.is_feasible()
+    assert schedule.total_duration == 30
+
+
+def test_high_priority_scheduled_before_low():
+    """
+    Happy Path: High priority tasks should be scheduled before low priority.
+    """
+    # Arrange: High and low priority tasks
+    owner = Owner(name="Alice", time_available=100)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Low Priority", duration=20, priority="low"),
+        CareTask(name="High Priority", duration=30, priority="high"),
+        CareTask(name="Medium Priority", duration=25, priority="medium"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Generate schedule
+    schedule = scheduler.generate_schedule()
+
+    # Assert: Scheduled in priority order
+    assert schedule.scheduled_tasks[0].priority == "high"
+    assert schedule.scheduled_tasks[1].priority == "medium"
+    assert schedule.scheduled_tasks[2].priority == "low"
+
+
+def test_same_priority_shorter_task_first():
+    """
+    Scheduling Logic: Among same priority, shorter tasks should come first.
+    """
+    # Arrange: Same priority, different durations
+    owner = Owner(name="Alice", time_available=100)
+    pet = Pet(name="Buddy", type="dog")
+
+    tasks = [
+        CareTask(name="Long", duration=40, priority="high"),
+        CareTask(name="Short", duration=10, priority="high"),
+        CareTask(name="Medium", duration=25, priority="high"),
+    ]
+
+    scheduler = Scheduler(owner=owner, pet=pet, tasks=tasks)
+
+    # Act: Generate schedule
+    schedule = scheduler.generate_schedule()
+
+    # Assert: Same priority sorted by duration
+    assert schedule.scheduled_tasks[0].duration == 10
+    assert schedule.scheduled_tasks[1].duration == 25
+    assert schedule.scheduled_tasks[2].duration == 40
+
+
 if __name__ == "__main__":
-    # Run tests directly if called as script
-    print("Running Test 1: Task Completion")
-    test_task_completion()
-    print("✅ Test 1 passed!\n")
+    # Run all tests
+    tests = [
+        # Basic functionality
+        ("Task Completion", test_task_completion),
+        ("Task Addition to Pet", test_task_addition_to_pet),
 
-    print("Running Test 2: Task Addition to Pet")
-    test_task_addition_to_pet()
-    print("✅ Test 2 passed!\n")
+        # Recurring tasks
+        ("Recurring Task - Daily", test_recurring_task_daily),
+        ("Recurring Task - Weekly", test_recurring_task_weekly),
+        ("Recurring Task - Once", test_recurring_task_once),
+        ("Recurring - No Due Date", test_recurring_daily_without_due_date),
+        ("Recurring - Chain", test_recurring_task_chain),
+        ("Recurring - Preserve Attributes", test_recurring_task_preserves_attributes),
 
-    print("Running Test 3: Recurring Task - Daily")
-    test_recurring_task_daily()
-    print("✅ Test 3 passed!\n")
+        # Conflict detection
+        ("Conflict - Exact Time", test_conflict_detection_exact_time),
+        ("Conflict - Overlap", test_conflict_detection_overlap),
+        ("Conflict - No Conflicts", test_conflict_detection_no_conflicts),
+        ("Conflict - No Times", test_conflict_detection_no_times),
+        ("Conflict - Multiple Collisions", test_conflict_detection_multiple_collisions),
+        ("Conflict - Back-to-Back", test_conflict_detection_back_to_back),
+        ("Conflict - 1 Min Overlap", test_conflict_detection_one_minute_overlap),
 
-    print("Running Test 4: Recurring Task - Weekly")
-    test_recurring_task_weekly()
-    print("✅ Test 4 passed!\n")
+        # Sorting
+        ("Sort - Chronological Order", test_sort_by_time_chronological_order),
+        ("Sort - None Values", test_sort_by_time_with_none_values),
 
-    print("Running Test 5: Recurring Task - Once")
-    test_recurring_task_once()
-    print("✅ Test 5 passed!\n")
+        # Edge cases
+        ("Edge - No Tasks", test_pet_with_no_tasks),
+        ("Edge - Zero Time", test_zero_time_available),
+        ("Edge - Exact Fit", test_single_task_exactly_fits_time),
 
-    print("Running Test 6: Conflict Detection - Exact Time")
-    test_conflict_detection_exact_time()
-    print("✅ Test 6 passed!\n")
+        # Priority scheduling
+        ("Priority - High Before Low", test_high_priority_scheduled_before_low),
+        ("Priority - Same Priority Order", test_same_priority_shorter_task_first),
+    ]
 
-    print("Running Test 7: Conflict Detection - Overlap")
-    test_conflict_detection_overlap()
-    print("✅ Test 7 passed!\n")
+    passed = 0
+    failed = 0
 
-    print("Running Test 8: Conflict Detection - No Conflicts")
-    test_conflict_detection_no_conflicts()
-    print("✅ Test 8 passed!\n")
+    print("=" * 70)
+    print("🧪 Running PawPal+ Test Suite")
+    print("=" * 70)
+    print()
 
-    print("Running Test 9: Conflict Detection - No Times")
-    test_conflict_detection_no_times()
-    print("✅ Test 9 passed!\n")
+    for i, (name, test_func) in enumerate(tests, 1):
+        try:
+            test_func()
+            print(f"✅ Test {i:2d}: {name}")
+            passed += 1
+        except AssertionError as e:
+            print(f"❌ Test {i:2d}: {name}")
+            print(f"          Error: {e}")
+            failed += 1
+        except Exception as e:
+            print(f"💥 Test {i:2d}: {name}")
+            print(f"          Exception: {e}")
+            failed += 1
 
-    print("All tests passed! 🎉")
+    print()
+    print("=" * 70)
+    print(f"📊 Results: {passed} passed, {failed} failed out of {len(tests)} tests")
+    print("=" * 70)
+
+    if failed == 0:
+        print("✅ All tests passed! 🎉")
+    else:
+        print(f"⚠️  {failed} test(s) need attention")
